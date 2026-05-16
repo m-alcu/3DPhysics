@@ -1,0 +1,222 @@
+#pragma once
+
+#include "app_state.hpp"
+#include "backgrounds/background_factory.hpp"
+#include "ecs/physics_component.hpp"
+#include "scenes/scene_factory.hpp"
+#include "vendor/imgui/imgui.h"
+
+#include <vector>
+
+namespace SceneUI {
+
+inline void drawSceneSelector(AppState& state, Screen screen) {
+    int currentBackground = static_cast<int>(state.scene->backgroundType);
+    const auto& names = SceneFactory::allSceneNames();
+    auto itemGetter = [](void* data, int idx) -> const char* {
+        auto* v = static_cast<const std::vector<std::string>*>(data);
+        return (*v)[idx].c_str();
+    };
+    if (ImGui::Combo("Scene", &state.currentSceneIndex, itemGetter,
+                     const_cast<void*>(static_cast<const void*>(&names)),
+                     SceneFactory::sceneCount())) {
+        auto newScene = SceneFactory::createSceneByIndex(state.currentSceneIndex, screen);
+        if (newScene) {
+            state.scene = std::move(newScene);
+            state.scene->setup();
+            state.scene->backgroundType = static_cast<BackgroundType>(currentBackground);
+            state.scene->background = std::unique_ptr<Background>(
+                BackgroundFactory::createBackground(state.scene->backgroundType));
+        }
+    }
+}
+
+inline void drawSolidControls(Scene& scene) {
+    if (scene.entities.empty()) return;
+
+    scene.selectedEntityIndex = std::clamp(scene.selectedEntityIndex, 0,
+                                     static_cast<int>(scene.entities.size() - 1));
+
+    // Build solid labels for combo
+    std::vector<std::string> solidLabels;
+    solidLabels.reserve(scene.entities.size());
+    std::vector<const char*> solidLabelPtrs;
+    solidLabelPtrs.reserve(scene.entities.size());
+
+    for (size_t i = 0; i < scene.entities.size(); ++i) {
+      Entity entity = scene.entities[i];
+      const auto* nameComp = scene.registry.names().get(entity);
+      const std::string& solidName = nameComp ? nameComp->name : std::string();
+      if (!solidName.empty()) {
+        solidLabels.push_back(solidName);
+      } else {
+        solidLabels.push_back("Solid " + std::to_string(i));
+      }
+      solidLabelPtrs.push_back(solidLabels.back().c_str());
+    }
+
+    if (ImGui::Combo("Selected Solid", &scene.selectedEntityIndex,
+                     solidLabelPtrs.data(),
+                     static_cast<int>(solidLabelPtrs.size()))) {
+      Entity entity = scene.entities[scene.selectedEntityIndex];
+      auto* transform = scene.registry.transforms().get(entity);
+      auto* mesh = scene.registry.meshes().get(entity);
+      if (transform && mesh) {
+        scene.camera.orbitTarget = TransformSystem::getWorldCenter(*transform);
+        scene.camera.setOrbitFromCurrent();
+      }
+    }
+
+    Entity entity = scene.entities[scene.selectedEntityIndex];
+    auto* render = scene.registry.renders().get(entity);
+    auto* transform = scene.registry.transforms().get(entity);
+    if (!render || !transform) {
+      return;
+    }
+
+    int currentShading = static_cast<int>(render->shading);
+    if (ImGui::Combo("Shading", &currentShading, shadingNames,
+                     IM_ARRAYSIZE(shadingNames))) {
+      render->shading = static_cast<Shading>(currentShading);
+    }
+
+    ImGui::Checkbox("Rotate", &transform->autoRotate);
+    ImGui::SliderFloat("Rot X Speed", &transform->incXangle, 0.0f, 1.0f);
+    ImGui::SliderFloat("Rot Y Speed", &transform->incYangle, 0.0f, 1.0f);
+
+    float position[3] = {transform->position.x,
+                         transform->position.y,
+                         transform->position.z};
+    if (ImGui::DragFloat3("Position", position, 1.0f)) {
+      transform->position.x = position[0];
+      transform->position.y = position[1];
+      transform->position.z = position[2];
+    }
+
+    ImGui::DragFloat("Zoom", &transform->position.zoom, 0.1f, 0.01f, 500.0f);
+
+    float angles[3] = {transform->position.xAngle,
+                       transform->position.yAngle,
+                       transform->position.zAngle};
+    if (ImGui::DragFloat3("Angles", angles, 1.0f, -360.0f, 360.0f)) {
+      transform->position.xAngle = angles[0];
+      transform->position.yAngle = angles[1];
+      transform->position.zAngle = angles[2];
+    }
+
+    bool orbitEnabled = transform->orbit.enabled;
+    if (ImGui::Checkbox("Enable Orbit", &orbitEnabled)) {
+      if (orbitEnabled) {
+        TransformSystem::enableCircularOrbit(*transform,
+                                             transform->orbit.center,
+                                             transform->orbit.radius,
+                                             transform->orbit.n,
+                                             transform->orbit.omega,
+                                             transform->orbit.phase);
+      } else {
+        TransformSystem::disableCircularOrbit(*transform);
+      }
+    }
+
+    float orbitCenter[3] = {transform->orbit.center.x,
+                            transform->orbit.center.y,
+                            transform->orbit.center.z};
+    if (ImGui::DragFloat3("Orbit Center", orbitCenter, 1.0f)) {
+      transform->orbit.center = {orbitCenter[0], orbitCenter[1], orbitCenter[2]};
+    }
+
+    ImGui::DragFloat("Orbit Radius", &transform->orbit.radius, 0.1f, 0.0f, 10000.0f);
+    ImGui::DragFloat("Orbit Speed", &transform->orbit.omega, 0.01f, -10.0f, 10.0f);
+
+    // Physics
+    ImGui::Separator();
+    ImGui::Text("Physics");
+    auto* physics = scene.registry.physics().get(entity);
+    if (!physics) {
+      if (ImGui::Button("Add Physics")) {
+        scene.registry.physics().add(entity, PhysicsComponent{});
+      }
+    } else {
+      ImGui::Checkbox("Static (immovable)", &physics->isStatic);
+      if (!physics->isStatic) {
+        ImGui::SliderFloat("Restitution", &physics->restitution, 0.0f, 1.0f);
+        ImGui::DragFloat("Gravity", &physics->gravity, 10.0f, 0.0f, 9800.0f);
+        ImGui::DragFloat("Floor Y", &physics->floorY, 1.0f);
+        float vel[3] = {physics->velocity.x, physics->velocity.y, physics->velocity.z};
+        if (ImGui::DragFloat3("Velocity", vel, 1.0f)) {
+          physics->velocity = {vel[0], vel[1], vel[2]};
+        }
+        if (ImGui::Button("Reset Velocity")) {
+          physics->velocity = {0.0f, 0.0f, 0.0f};
+        }
+      }
+    }
+
+    // Light properties (only shown if solid is a light source)
+    auto* lightComponent = scene.registry.lights().get(entity);
+    if (lightComponent) {
+      ImGui::Separator();
+      ImGui::Text("Light Source");
+      ImGui::SliderFloat("Light Intensity", &lightComponent->light.intensity, 0.0f, 100.0f);
+    }
+}
+
+inline void drawCameraControls(Scene& scene) {
+    ImGui::SliderFloat("Cam Speed", &scene.camera.speed, 0.1f, 10.0f);
+    ImGui::SliderFloat("Pitch/Yaw/Roll Sens", &scene.camera.sensitivity, 0.0f, 10.0f);
+}
+
+inline void drawSceneControls(Scene& scene) {
+    int currentBackground = static_cast<int>(scene.backgroundType);
+    if (ImGui::Combo("Background", &currentBackground, backgroundNames,
+                     IM_ARRAYSIZE(backgroundNames))) {
+      scene.backgroundType = static_cast<BackgroundType>(currentBackground);
+      scene.background = std::unique_ptr<Background>(
+          BackgroundFactory::createBackground(scene.backgroundType));
+    }
+
+    ImGui::Checkbox("Show Axis Helper", &scene.showAxes);
+    ImGui::Checkbox("Face Depth Sorting", &scene.depthSortEnabled);
+    ImGui::Checkbox("Blinn-Phong Specular", &scene.blinnPhong);
+    ImGui::Checkbox("Shadows Enabled", &scene.shadowsEnabled);
+    ImGui::Checkbox("Show Shadow Map Overlay", &scene.showShadowMapOverlay);
+    ImGui::Checkbox("Use Cubemap Shadows (Point Lights)", &scene.useCubemapShadows);
+
+    static const char* pcfLabels[] = {"Off (0)", "3x3 (1)", "5x5 (2)"};
+    int currentPcfRadius = scene.pcfRadius;
+    if (ImGui::Combo("PCF Radius", &currentPcfRadius, pcfLabels, IM_ARRAYSIZE(pcfLabels))) {
+      scene.pcfRadius = currentPcfRadius;
+    }
+
+    ImGui::Separator();
+    ImGui::Text("Shadow Bias Configuration");
+    ImGui::SliderFloat("Cube Max Slope Bias", &scene.cubeShadowMaxSlopeBias, 1.0f, 50.0f, "%.1f");
+
+    ImGui::Separator();
+    static const char* fontLabels[] = {"Default", "IBM CGA", "ZX Spectrum", "Amstrad CPC", "Commodore 64", "Atari 8-bit", "Retro"};
+    int currentFont = static_cast<int>(scene.font);
+    if (ImGui::Combo("Font", &currentFont, fontLabels, IM_ARRAYSIZE(fontLabels))) {
+      scene.font = static_cast<RendererFonts::FontType>(currentFont);
+    }
+
+    ImGui::Separator();
+    ImGui::Text("Scene Center: (%.2f, %.2f, %.2f)", scene.sceneCenter.x, scene.sceneCenter.y, scene.sceneCenter.z);
+    ImGui::Text("Scene Radius: %.2f", scene.sceneRadius);
+}
+
+inline void drawCameraInfo(const Scene& scene) {
+    ImGui::Text("Camera pos: (%.2f, %.2f, %.2f)", scene.camera.pos.x, scene.camera.pos.y, scene.camera.pos.z);
+    ImGui::Text("Camera for: (%.2f, %.2f, %.2f)", scene.camera.forward.x, scene.camera.forward.y, scene.camera.forward.z);
+    ImGui::Text("OrbitTarget: (%.2f, %.2f, %.2f)", scene.camera.orbitTarget.x, scene.camera.orbitTarget.y, scene.camera.orbitTarget.z);
+    ImGui::Text("Camera Pitch: %.2f, Yaw: %.2f, Roll: %.2f", scene.camera.pitch, scene.camera.yaw, scene.camera.roll);
+}
+
+inline void drawStats(const Scene& scene) {
+    ImGui::Separator();
+    ImGui::Text("Polys rendered: %u", scene.stats.polysRendered);
+    ImGui::Text("Pixels rasterized: %u", scene.stats.pixelsRasterized);
+    ImGui::Text("Draw calls: %u", scene.stats.drawCalls);
+    ImGui::Text("Vertices processed: %u", scene.stats.verticesProcessed);
+}
+
+} // namespace SceneUI
