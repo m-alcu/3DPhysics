@@ -6,6 +6,11 @@ scene:
   depth_sort_enabled: true
   background: desert
 
+  camera:
+    position: [0.0, 300.0, 0.0]
+    pitch: 0.38
+    yaw: 0.0
+
   solids:
     - type: obj_loader
       file: "resources/objs/cat_statue/concrete_cat_statue.obj"

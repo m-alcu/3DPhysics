@@ -60,6 +60,9 @@ public:
     }
     MeshSystem::updateAllBoundsIfDirty(registry.meshes());
     camera.setOrbitFromCurrent();
+    std::cerr << "[Scene::setup] Camera after setup: pos=("
+              << camera.pos.x << "," << camera.pos.y << "," << camera.pos.z
+              << ") pitch=" << camera.pitch << " yaw=" << camera.yaw << "\n";
   }
 
   virtual void update(float dt) {

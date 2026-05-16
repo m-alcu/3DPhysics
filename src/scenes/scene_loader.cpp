@@ -281,6 +281,11 @@ std::unique_ptr<Scene> SceneLoader::loadFromFile(const std::string& yamlPath,
 
     YAML::Node sceneNode = root["scene"];
 
+    std::cerr << "[SceneLoader] sceneNode type=" << (int)sceneNode.type
+              << " keys(" << sceneNode.mapKeys_.size() << "): ";
+    for (auto& k : sceneNode.mapKeys_) std::cerr << k << " ";
+    std::cerr << "\n";
+
     auto scene = std::make_unique<Scene>(scr);
     scene->sceneType = SceneType::YAML;
 
@@ -324,8 +329,14 @@ std::unique_ptr<Scene> SceneLoader::loadFromFile(const std::string& yamlPath,
     }
 
     // Camera
-    if (sceneNode["camera"])
+    if (sceneNode["camera"]) {
         parseCamera(sceneNode["camera"], scene->camera);
+        std::cerr << "[SceneLoader] Camera after parse: pos=("
+                  << scene->camera.pos.x << "," << scene->camera.pos.y << "," << scene->camera.pos.z
+                  << ") pitch=" << scene->camera.pitch << " yaw=" << scene->camera.yaw << "\n";
+    } else {
+        std::cerr << "[SceneLoader] No camera block found in YAML\n";
+    }
 
     // Solids
     if (sceneNode["solids"]) {
