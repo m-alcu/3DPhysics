@@ -7,7 +7,7 @@ scene:
   background: desert
 
   camera:
-    position: [0.0, 300.0, 0.0]
+    position: [0.0, 600.0, 1800.0]
     pitch: 0.38
     yaw: 0.0
 
@@ -40,7 +40,8 @@ scene:
       light:
         type: point
         color: [1.0, 1.0, 1.0]
-        intensity: 8.0
+        intensity: 2.0
+        radius: 2000.0
       orbit:
         center: [0.0, 200.0, -500.0]
         radius: 500.0
